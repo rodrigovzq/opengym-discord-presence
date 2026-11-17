@@ -16,12 +16,16 @@ import urllib.request
 from pypresence import Presence
 
 OG = os.environ.get("OG_URL", "http://100.71.223.9:31180").rstrip("/")
+# URL que Discord debe poder alcanzar para la imagen: su proxy la baja desde SUS servidores,
+# así que una IP LAN/Tailscale no sirve. Tiene que ser el host público (funnel, dominio, etc.).
+PUBLIC = os.environ.get("OG_PUBLIC", "").rstrip("/") or OG
 UID = os.environ.get("OG_UID", "")
 SECRET = os.environ.get("OG_SECRET", "")
 SV = int(os.environ.get("OG_SV", "0"))          # user.sv en data/db.json
 CLIENT = os.environ.get("DISCORD_CLIENT_ID", "")
 ASSET = os.environ.get("DISCORD_ASSET", "opengym")
 POLL = int(os.environ.get("POLL", "20"))
+_groups = {}                                     # nombre de rutina -> ids por grupo
 
 
 def cookie():
@@ -44,6 +48,42 @@ def live():
     return user and user.get("live")
 
 
+def routine_groups(name):
+    """Ids de ejercicio, uno por grupo, para el nombre de rutina que manda el heartbeat.
+
+    El heartbeat trae el nombre de la rutina y `exIdx` = índice de GRUPO (un superset es un
+    grupo), así que hay que reproducir el agrupado del front: vecinos con el mismo `sg`.
+    Se resuelve una vez por rutina: cambia solo al arrancar otro entrenamiento.
+    """
+    if not name:
+        return []
+    if name in _groups:
+        return _groups[name]
+    req = urllib.request.Request(
+        f"{OG}/api/data", headers={"Cookie": "__Host-gymsid=" + cookie()}
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        routines = json.load(r)["state"].get("routines") or []
+    routine = next((x for x in routines if x.get("name") == name), None)
+    if not routine:
+        return []
+    ids = group_ids(routine.get("ex") or [])
+    _groups[name] = ids
+    return ids
+
+
+def group_ids(ex):
+    """Primer id de cada grupo: vecinos adyacentes con el mismo `sg` son un superset."""
+    out = []
+    for e in ex:
+        sg = e.get("sg")
+        if out and sg and sg == out[-1][-1].get("sg"):
+            out[-1].append(e)
+        else:
+            out.append([e])
+    return [g[0]["id"] for g in out if g and g[0].get("id")]
+
+
 def payload(p):
     ex_total = max(0, p.get("exTotal") or 0)
     ex_idx = max(0, p.get("exIdx") or 0)
@@ -60,6 +100,11 @@ def payload(p):
         "large_image": ASSET,
         "large_text": "openGym",
     }
+    # Imagen: el still del ejercicio que está haciendo, servido por la app. Discord la baja
+    # desde su proxy, así que PUBLIC tiene que ser alcanzable desde internet (no LAN/Tailscale).
+    ids = routine_groups(p.get("name"))
+    if 0 < ex_idx <= len(ids):
+        out["large_image"] = f"{PUBLIC}/exercise-media/still/{ids[ex_idx - 1]}.webp"
     started = int((p.get("startedAt") or 0) / 1000)
     # Una sesión dejada abierta días mostraría "hace 3 días": sin contador pasado un margen.
     if started and 0 < time.time() - started < 4 * 3600:
@@ -100,4 +145,12 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        # Un superset (mismo sg seguido) cuenta como UN grupo; un sg suelto o repetido no une.
+        assert group_ids([{"id": "a"}, {"id": "b", "sg": "x"}, {"id": "c", "sg": "x"},
+                          {"id": "d"}, {"id": "e", "sg": "y"}]) == ["a", "b", "d", "e"]
+        pl = payload({"name": "", "exIdx": 0, "exTotal": 0, "setsDone": 3, "setsTotal": 9})
+        assert pl["state"] == "3/9 sets" and pl["large_image"] == ASSET and "start" not in pl
+        print("ok")
+        raise SystemExit
     main()

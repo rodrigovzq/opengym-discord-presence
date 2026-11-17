@@ -1,8 +1,8 @@
 # opengym-discord-presence
 
 Show your live workout from [openGym](https://gitlab.com/DuarteSantos28/opengym) as a
-Discord Rich Presence card: routine, sets done, position in the session and a running
-timer.
+Discord Rich Presence card: the exercise you are on, the routine, the sets done and a
+running timer.
 
 ```
 Playing openGym
@@ -10,6 +10,9 @@ Playing openGym
   20/25 sets · 4/4
   ──────────────────────── 41:04
 ```
+
+The card image is the picture openGym itself shows for the exercise you are on — the app
+serves it, the script just points at it.
 
 One Python file, no dependencies beyond `pypresence`.
 
@@ -59,13 +62,18 @@ upgrade.
 3. **Rich Presence → Art Assets** → upload a logo with the key `opengym`
    (the key must match `DISCORD_ASSET`). Without an asset the card has no image.
 
-### 2. Collect the three openGym values
+### 2. Collect the openGym values
 
 | Value | Where |
 |---|---|
 | `OG_UID` | your user id: `id` in `data/db.json`, or the `state-<UID>.json` filename |
 | `OG_SECRET` | `cat data/secret` (`data` is the API's data volume) |
 | `OG_SV` | your user's `sv` in `data/db.json`; `0` unless you used "sign out everywhere" |
+
+The image needs `OG_PUBLIC`: pick the URL the app is reachable at **from the open
+internet** (a reverse proxy, a tunnel, a public hostname). Discord downloads the picture
+from its own servers, so a LAN or Tailscale address renders as an empty box. If your
+instance is private, leave the logo as the image (`DISCORD_ASSET`) and skip this.
 
 ### 3. Install the script
 
@@ -88,7 +96,8 @@ sudo nano /etc/opengym-presence.env
 | `OG_SECRET` | yes | — | Contents of `data/secret` |
 | `OG_SV` | no | `0` | Your user's `sv` |
 | `DISCORD_CLIENT_ID` | yes | — | Application ID from step 1 |
-| `DISCORD_ASSET` | no | `opengym` | Asset key for the card image |
+| `OG_PUBLIC` | no | `OG_URL` | Public base URL of the app, **reachable from the internet** |
+| `DISCORD_ASSET` | no | `opengym` | Fallback asset when the exercise has no picture |
 | `POLL` | no | `20` | Seconds between polls |
 
 ### 5. Test before installing the service
@@ -129,6 +138,8 @@ for running the Discord client on a virtual display (~500 MB RAM).
 | `ConnectionRefusedError` | Discord isn't running, or `XDG_RUNTIME_DIR` points to another user's runtime dir |
 | `User logged out` (error 1000) | Discord lost the session — check the client's screen and log in again |
 | Card never appears, `--once` prints a payload | The Discord side: is the client up, is the socket there (`ls /run/user/$(id -u)/discord-ipc-0`)? |
+| Image is an empty box | `OG_PUBLIC` isn't reachable from the internet, or that exercise has no still |
+| Image is the app logo | The routine wasn't found by name in your state (renamed mid-workout, custom session) |
 | Service restart-loops with `status=203/EXEC` | The script isn't executable: `chmod 755` |
 | Card disappears mid-set | The phone screen was off / the app went to background for more than 45 s |
 | Card shows no timer | The session started more than 4 h ago (a workout left open overnight) |
@@ -146,8 +157,11 @@ curl -s -H "Cookie: __Host-gymsid=$COOKIE" "$OG_URL/api/admin/users" | jq '.user
 - The timer counts up from the workout's start; openGym doesn't know when it will end, so
   there is no progress bar.
 - `exIdx`/`exTotal` counts **groups**, not exercises: a superset is one group. That is why
-  the card shows a bare `4/4` instead of naming the exercise — the heartbeat doesn't carry
-  exercise names.
+  the card shows a bare `4/4` — the heartbeat carries no exercise names.
+- The picture is the exercise's **still** (`/exercise-media/still/<id>.webp`), not the
+  animated clip: Discord renders static images only, and the clip is an `.mp4`.
+- In a superset group the card shows the first exercise of the group, because the
+  heartbeat says which group, not which member of it.
 - Discord has no "training" activity type, so the label is **Playing openGym**.
 - One card per Discord app; if you run this next to another presence, Discord shows the
   most recent one.
