@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """openGym -> Discord Rich Presence por IPC local (necesita el cliente Discord en este host).
 
-Requiere: OG_SECRET, OG_UID, DISCORD_CLIENT_ID. Opcional: OG_URL, OG_SV, DISCORD_ASSET, POLL.
-Uso: ./opengym-discord-presence.py [--once]   (--once imprime el payload y sale, sin Discord)
+Config: config.json junto al script (o --config /ruta/config.json, o OG_CONFIG).
+Uso: ./opengym-discord-presence.py [--once | --selftest] [--config RUTA]
 """
 import base64
 import hashlib
@@ -15,16 +15,57 @@ import urllib.request
 
 from pypresence import Presence
 
-OG = os.environ.get("OG_URL", "http://100.71.223.9:31180").rstrip("/")
+DEFAULTS = {
+    "url": "http://127.0.0.1:31180",   # API de openGym, alcanzable desde este host
+    "public_url": "",                  # URL pública de la app (imágenes); vacío = url
+    "uid": "",                         # id de usuario de openGym (admin)
+    "secret": "",                      # contenido de data/secret
+    "sv": 0,                           # user.sv en data/db.json
+    "client_id": "",                   # Application ID de Discord
+    "asset": "opengym",                # asset de fallback
+    "poll": 20,                        # segundos entre polls
+}
+ENV = {"url": "OG_URL", "public_url": "OG_PUBLIC", "uid": "OG_UID", "secret": "OG_SECRET",
+       "sv": "OG_SV", "client_id": "DISCORD_CLIENT_ID", "asset": "DISCORD_ASSET", "poll": "POLL"}
+
+
+def arg(flag):
+    if flag in sys.argv:
+        i = sys.argv.index(flag)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return ""
+
+
+def load_config():
+    """config.json manda; las variables de entorno son el fallback para deploys sin archivo."""
+    cfg = dict(DEFAULTS)
+    path = arg("--config") or os.environ.get("OG_CONFIG") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "config.json")
+    try:
+        with open(path) as f:
+            cfg.update({k: v for k, v in json.load(f).items() if k in DEFAULTS})
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        sys.exit(f"config {path}: {e}")
+    for key, name in ENV.items():
+        if os.environ.get(name):
+            cfg[key] = os.environ[name]
+    return cfg
+
+
+CFG = load_config()
+OG = str(CFG["url"]).rstrip("/")
 # URL que Discord debe poder alcanzar para la imagen: su proxy la baja desde SUS servidores,
 # así que una IP LAN/Tailscale no sirve. Tiene que ser el host público (funnel, dominio, etc.).
-PUBLIC = os.environ.get("OG_PUBLIC", "").rstrip("/") or OG
-UID = os.environ.get("OG_UID", "")
-SECRET = os.environ.get("OG_SECRET", "")
-SV = int(os.environ.get("OG_SV", "0"))          # user.sv en data/db.json
-CLIENT = os.environ.get("DISCORD_CLIENT_ID", "")
-ASSET = os.environ.get("DISCORD_ASSET", "opengym")
-POLL = int(os.environ.get("POLL", "20"))
+PUBLIC = str(CFG["public_url"] or "").rstrip("/") or OG
+UID = str(CFG["uid"])
+SECRET = str(CFG["secret"])
+SV = int(CFG["sv"] or 0)
+CLIENT = str(CFG["client_id"])
+ASSET = str(CFG["asset"] or "opengym")
+POLL = int(CFG["poll"] or 20)
 _groups = {}                                     # nombre de rutina -> ids por grupo
 
 
@@ -113,6 +154,9 @@ def payload(p):
 
 
 def main():
+    missing = [k for k in ("uid", "secret", "client_id") if not CFG.get(k)]
+    if missing:
+        sys.exit("falta configurar: " + ", ".join(missing) + " (ver config.example.json)")
     once = "--once" in sys.argv
     rpc = None
     while True:

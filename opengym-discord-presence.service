@@ -10,8 +10,7 @@ After=network-online.target
 Type=simple
 # Must match the user running Discord: the socket is at $XDG_RUNTIME_DIR/discord-ipc-0
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-EnvironmentFile=/etc/opengym-presence.env
-ExecStart=/usr/local/bin/opengym-discord-presence.py
+ExecStart=/usr/local/bin/opengym-discord-presence.py --config /etc/opengym-presence.json
 Restart=always
 RestartSec=10
 

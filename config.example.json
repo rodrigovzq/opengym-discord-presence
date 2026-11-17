@@ -1,0 +1,10 @@
+{
+  "url": "http://127.0.0.1:31180",
+  "public_url": "",
+  "uid": "YOUR_OPEN_GYM_UID",
+  "secret": "PASTE_DATA_SECRET",
+  "sv": 0,
+  "client_id": "YOUR_DISCORD_APPLICATION_ID",
+  "asset": "opengym",
+  "poll": 20
+}
